@@ -22,10 +22,10 @@ fn main() {
         .iter()
         .find_map(|history| Some(fetch_deps(&history.version)))
         .expect("No matched version");
-    println!("==> deps: {:#?}", deps);
-
     let (prefix, revision) =
         find_builds(builds.iter(), deps.chromium_base_position.parse().unwrap()).unwrap();
+    println!("==> found nearest revision: {}", revision);
+
     let build_files = fetch_build_detail(prefix);
     let win_zip = build_files
         .iter()
@@ -42,10 +42,11 @@ fn main() {
 
     let base_path = std::env::current_dir()
         .unwrap()
-        .join(format!("chrome-{}", revision));
+        .join(format!("tmp-chromium-{}", revision));
     std::fs::create_dir_all(&base_path).unwrap();
 
     let mut prefix = String::new();
+    let mut version = String::new();
     loop {
         let mut zip = match read_zipfile_from_stream(&mut win_zip_response) {
             Ok(Some(zip)) => zip,
@@ -53,14 +54,23 @@ fn main() {
             Err(err) => panic!("Error: {:?}", err),
         };
 
+        let zip_name = zip.name();
         if prefix.is_empty() {
             if zip.is_dir() {
                 prefix = zip.name().to_owned();
             } else {
                 panic!("Invalid zip file");
             }
-        } else if zip.name().starts_with(&prefix) {
-            let file_path = base_path.join(&zip.name()[prefix.len()..]);
+        } else if zip_name.starts_with(&prefix) {
+            const MANIFEST_SUFFIX: &str = ".manifest";
+            if zip_name.ends_with(MANIFEST_SUFFIX) {
+                let manifest_name = zip_name
+                    .rsplit_once("/")
+                    .map(|(_, n)| n)
+                    .unwrap_or(zip_name);
+                version = manifest_name[..manifest_name.len() - MANIFEST_SUFFIX.len()].to_owned();
+            }
+            let file_path = base_path.join(&zip_name[prefix.len()..]);
             if zip.is_dir() {
                 std::fs::create_dir_all(file_path).unwrap();
             } else {
@@ -81,6 +91,21 @@ fn main() {
 
         println!("==> unzip: {}", zip.name());
     }
+
+    let dest_path = std::env::current_dir().unwrap().join(format!(
+        "chromium-{}",
+        if version.is_empty() {
+            revision.to_string()
+        } else {
+            version
+        }
+    ));
+    println!(
+        "==> moving {} to {}",
+        base_path.to_str().unwrap(),
+        dest_path.to_str().unwrap()
+    );
+    std::fs::rename(base_path, dest_path).unwrap();
 }
 
 fn get_build_list() -> Vec<String> {
