@@ -2,12 +2,13 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::{copy, BufReader, BufWriter},
+    io::{copy, BufReader},
     path::PathBuf,
     slice::Iter,
 };
 
 use serde::{Deserialize, Serialize};
+use zip::read::read_zipfile_from_stream;
 
 fn main() {
     let ver = std::env::args().skip(1).next().unwrap();
@@ -28,19 +29,47 @@ fn main() {
     println!("==> downloading {}", win_zip.media_link);
     let mut win_zip_response = reqwest::blocking::get(win_zip.media_link).unwrap();
 
-    let chrome_zip_path = format!("chrome-{}.zip", revision);
-    copy(
-        &mut win_zip_response,
-        &mut BufWriter::new(
-            OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .create(true)
-                .open(chrome_zip_path)
-                .unwrap(),
-        ),
-    )
-    .unwrap();
+    let base_path = std::env::current_dir()
+        .unwrap()
+        .join(format!("chrome-{}", revision));
+    std::fs::create_dir_all(&base_path).unwrap();
+
+    let mut prefix = String::new();
+    loop {
+        let mut zip = match read_zipfile_from_stream(&mut win_zip_response) {
+            Ok(Some(zip)) => zip,
+            Ok(None) => break,
+            Err(err) => panic!("Error: {:?}", err),
+        };
+
+        if prefix.is_empty() {
+            if zip.is_dir() {
+                prefix = zip.name().to_owned();
+            } else {
+                panic!("Invalid zip file");
+            }
+        } else if zip.name().starts_with(&prefix) {
+            let file_path = base_path.join(&zip.name()[prefix.len()..]);
+            if zip.is_dir() {
+                std::fs::create_dir_all(file_path).unwrap();
+            } else {
+                copy(
+                    &mut zip,
+                    &mut OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .create(true)
+                        .open(file_path)
+                        .unwrap(),
+                )
+                .unwrap();
+            }
+        } else {
+            panic!("Invalid file name");
+        }
+
+        println!("==> unzip: {}", zip.name());
+    }
 }
 
 fn get_build_list() -> Vec<String> {
