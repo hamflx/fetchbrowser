@@ -46,7 +46,7 @@ fn main() {
     std::fs::create_dir_all(&base_path).unwrap();
 
     let mut prefix = String::new();
-    let mut version = String::new();
+    let mut version_list = Vec::new();
     loop {
         let mut zip = match read_zipfile_from_stream(&mut win_zip_response) {
             Ok(Some(zip)) => zip,
@@ -68,7 +68,15 @@ fn main() {
                     .rsplit_once("/")
                     .map(|(_, n)| n)
                     .unwrap_or(zip_name);
-                version = manifest_name[..manifest_name.len() - MANIFEST_SUFFIX.len()].to_owned();
+                let manifest_name =
+                    manifest_name[..manifest_name.len() - MANIFEST_SUFFIX.len()].to_owned();
+                if manifest_name
+                    .split('.')
+                    .into_iter()
+                    .all(|part| part.parse::<usize>().is_ok())
+                {
+                    version_list.push(manifest_name);
+                }
             }
             let file_path = base_path.join(&zip_name[prefix.len()..]);
             if zip.is_dir() {
@@ -92,20 +100,41 @@ fn main() {
         println!("==> unzip: {}", zip.name());
     }
 
-    let dest_path = std::env::current_dir().unwrap().join(format!(
-        "chromium-{}",
-        if version.is_empty() {
-            revision.to_string()
-        } else {
-            version
-        }
-    ));
+    let version = find_latest_version(&version_list)
+        .map(|(major, minor, branch, patch)| format!("{major}.{minor}.{branch}.{patch}"))
+        .unwrap_or_else(|| revision.to_string());
+    let dest_path = std::env::current_dir()
+        .unwrap()
+        .join(format!("chromium-{}", version));
     println!(
         "==> moving {} to {}",
         base_path.to_str().unwrap(),
         dest_path.to_str().unwrap()
     );
     std::fs::rename(base_path, dest_path).unwrap();
+}
+
+fn find_latest_version(version_list: &Vec<String>) -> Option<(usize, usize, usize, usize)> {
+    let mut latest_version = None;
+    version_list.iter().for_each(|ver| {
+        let split: Vec<_> = ver.split('.').collect();
+        if let [major, minor, branch, patch] = split.as_slice() {
+            let ver_tuple = (
+                major.parse::<usize>().unwrap(),
+                minor.parse::<usize>().unwrap(),
+                branch.parse::<usize>().unwrap(),
+                patch.parse::<usize>().unwrap(),
+            );
+            if let Some(ver) = &latest_version {
+                if ver_tuple > *ver {
+                    latest_version = Some(ver_tuple);
+                }
+            } else {
+                latest_version = Some(ver_tuple);
+            }
+        }
+    });
+    latest_version
 }
 
 fn get_build_list() -> Vec<String> {
