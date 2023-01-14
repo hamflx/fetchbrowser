@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use zip::read::read_zipfile_from_stream;
 
 fn main() {
-    let ver = std::env::args().skip(1).next().unwrap();
+    let ver = std::env::args().nth(1).unwrap();
 
     let builds = get_build_list();
 
@@ -20,7 +20,7 @@ fn main() {
 
     let deps = matched_history_list
         .iter()
-        .find_map(|history| Some(fetch_deps(&history.version)))
+        .find_map(|history| fetch_deps(&history.version))
         .expect("No matched version");
     let (prefix, revision) =
         find_builds(builds.iter(), deps.chromium_base_position.parse().unwrap()).unwrap();
@@ -65,7 +65,7 @@ fn main() {
             const MANIFEST_SUFFIX: &str = ".manifest";
             if zip_name.ends_with(MANIFEST_SUFFIX) {
                 let manifest_name = zip_name
-                    .rsplit_once("/")
+                    .rsplit_once('/')
                     .map(|(_, n)| n)
                     .unwrap_or(zip_name);
                 let manifest_name =
@@ -114,7 +114,7 @@ fn main() {
     std::fs::rename(base_path, dest_path).unwrap();
 }
 
-fn find_latest_version(version_list: &Vec<String>) -> Option<(usize, usize, usize, usize)> {
+fn find_latest_version(version_list: &[String]) -> Option<(usize, usize, usize, usize)> {
     let mut latest_version = None;
     version_list.iter().for_each(|ver| {
         let split: Vec<_> = ver.split('.').collect();
@@ -188,10 +188,10 @@ fn fetch_build_detail(prefix: &str) -> Vec<GoogleApiStorageObject> {
     build_detail.items
 }
 
-fn fetch_deps(version: &str) -> ChromiumDepsInfo {
+fn fetch_deps(version: &str) -> Option<ChromiumDepsInfo> {
     let url = format!("https://omahaproxy.appspot.com/deps.json?version={version}");
     let response = reqwest::blocking::get(url).unwrap();
-    serde_json::from_reader(response).unwrap()
+    Some(serde_json::from_reader(response).unwrap())
 }
 
 fn find_history<'a>(
@@ -204,12 +204,12 @@ fn find_history<'a>(
         .collect()
 }
 
-fn find_builds<'a>(build_list: Iter<'a, String>, find_pos: usize) -> Option<(&'a String, usize)> {
+fn find_builds(build_list: Iter<String>, find_pos: usize) -> Option<(&String, usize)> {
     let prefix = "Win_x64/";
     let mut list: Vec<_> = build_list
         .filter_map(|build| {
             if build.starts_with(prefix) {
-                if let Ok(build_pos) = (&build[prefix.len()..build.len() - 1]).parse::<usize>() {
+                if let Ok(build_pos) = build[prefix.len()..build.len() - 1].parse::<usize>() {
                     Some((build, build_pos))
                 } else {
                     None
