@@ -7,26 +7,62 @@ use std::{
     slice::Iter,
 };
 
+use anyhow::{anyhow, Result};
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use zip::read::read_zipfile_from_stream;
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg()]
+    chromium_version: String,
+}
+
 fn main() {
-    let ver = std::env::args().nth(1).unwrap();
+    if let Err(err) = run() {
+        eprintln!("Error: {:?}", err);
+    }
+}
 
-    let builds = get_build_list();
+fn run() -> anyhow::Result<()> {
+    let args = Args::parse();
 
-    let history_list = get_history_list();
-    let matched_history_list = find_history(history_list.iter(), &ver);
+    // history.json 包含了 base_position 和版本号，根据用户提供的版本号，找到一个 base_position。
+    let history_list = get_history_list()?;
+    let matched_history_list = find_history(history_list.iter(), &args.chromium_version);
+    let mut chromium_base_position = None;
+    for history in matched_history_list {
+        let deps = fetch_deps(&history.version)?;
+        if let Some(pos) = deps.chromium_base_position {
+            match pos.parse::<usize>() {
+                Ok(pos) => {
+                    chromium_base_position = Some(pos);
+                    break;
+                }
+                Err(err) => println!(
+                    "==> chromium {}: parse base_position error: {:?}",
+                    deps.chromium_version, err
+                ),
+            }
+        } else {
+            println!(
+                "==> chromium {}: no chromium_base_position.",
+                deps.chromium_version
+            );
+        }
+    }
+    let chromium_base_position =
+        chromium_base_position.ok_or_else(|| anyhow!("未能根据版本号找到 position。"))?;
 
-    let deps = matched_history_list
-        .iter()
-        .find_map(|history| fetch_deps(&history.version))
-        .expect("No matched version");
-    let (prefix, revision) =
-        find_builds(builds.iter(), deps.chromium_base_position.parse().unwrap()).unwrap();
+    // 然后遍历所有的版本信息，取得最近的可以下载的 position 的 prefix。
+    let builds = get_build_list()?;
+    let (prefix, revision) = find_builds(builds.iter(), chromium_base_position)
+        .ok_or_else(|| anyhow::anyhow!("未找到 position <= {} 的版本。", chromium_base_position))?;
     println!("==> found nearest revision: {}", revision);
 
-    let build_files = fetch_build_detail(prefix);
+    // 根据 prefix 找到该版本文件列表，以及 chrome-win.zip 文件信息。
+    let build_files = fetch_build_detail(prefix)?;
     let win_zip = build_files
         .iter()
         .find(|f| f.name.ends_with("chrome-win.zip"))
@@ -35,16 +71,22 @@ fn main() {
                 .iter()
                 .find(|f| f.name.ends_with("chrome-win32.zip"))
         })
-        .unwrap();
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "在版本 {} 中，未找到 chrome-win.zip/chrome-win32-zip。",
+                prefix
+            )
+        })?;
 
+    // 开始下载压缩文件。
     println!("==> downloading {}", win_zip.media_link);
-    let mut win_zip_response = reqwest::blocking::get(&win_zip.media_link).unwrap();
+    let mut win_zip_response = reqwest::blocking::get(&win_zip.media_link)?;
 
-    let base_path = std::env::current_dir()
-        .unwrap()
-        .join(format!("tmp-chromium-{}", revision));
-    std::fs::create_dir_all(&base_path).unwrap();
+    // 先保存到临时目录里面，待解压的时候，找到里面的版本信息，再重命名一下文件夹。
+    let base_path = std::env::current_dir()?.join(format!("tmp-chromium-{}", revision));
+    std::fs::create_dir_all(&base_path)?;
 
+    // 执行 zip 解压过程，并去除压缩包的根目录。
     let mut prefix = String::new();
     let mut version_list = Vec::new();
     loop {
@@ -80,7 +122,13 @@ fn main() {
             }
             let file_path = base_path.join(&zip_name[prefix.len()..]);
             if zip.is_dir() {
-                std::fs::create_dir_all(file_path).unwrap();
+                std::fs::create_dir_all(&file_path).map_err(|err| {
+                    anyhow!(
+                        "创建目录 {} 时出错：{:?}",
+                        file_path.to_str().unwrap_or_default(),
+                        err
+                    )
+                })?;
             } else {
                 copy(
                     &mut zip,
@@ -88,10 +136,22 @@ fn main() {
                         .write(true)
                         .truncate(true)
                         .create(true)
-                        .open(file_path)
-                        .unwrap(),
+                        .open(&file_path)
+                        .map_err(|err| {
+                            anyhow!(
+                                "解压文件 {} 时出错：{:?}",
+                                file_path.to_str().unwrap_or_default(),
+                                err
+                            )
+                        })?,
                 )
-                .unwrap();
+                .map_err(|err| {
+                    anyhow!(
+                        "解压文件 {} 时出错：{:?}",
+                        file_path.to_str().unwrap_or_default(),
+                        err
+                    )
+                })?;
             }
         } else {
             panic!("Invalid file name");
@@ -100,31 +160,31 @@ fn main() {
         println!("==> unzip: {}", zip.name());
     }
 
+    // 有些 chrome 压缩包内可能存在多个形如“版本号.manifest”的文件，这里是找到最新的一个版本号，然后作为最终目录名。
     let version = find_latest_version(&version_list)
         .map(|(major, minor, branch, patch)| format!("{major}.{minor}.{branch}.{patch}"))
         .unwrap_or_else(|| revision.to_string());
-    let dest_path = std::env::current_dir()
-        .unwrap()
-        .join(format!("chromium-{}", version));
+    let dest_path = std::env::current_dir()?.join(format!("chromium-{}", version));
     println!(
         "==> moving {} to {}",
-        base_path.to_str().unwrap(),
-        dest_path.to_str().unwrap()
+        base_path.to_str().unwrap_or_default(),
+        dest_path.to_str().unwrap_or_default()
     );
-    std::fs::rename(base_path, dest_path).unwrap();
+    std::fs::rename(base_path, dest_path).map_err(|err| anyhow!("移动目录出错：{:?}", err))?;
+
+    Ok(())
 }
 
 fn find_latest_version(version_list: &[String]) -> Option<(usize, usize, usize, usize)> {
     let mut latest_version = None;
     version_list.iter().for_each(|ver| {
-        let split: Vec<_> = ver.split('.').collect();
-        if let [major, minor, branch, patch] = split.as_slice() {
-            let ver_tuple = (
-                major.parse::<usize>().unwrap(),
-                minor.parse::<usize>().unwrap(),
-                branch.parse::<usize>().unwrap(),
-                patch.parse::<usize>().unwrap(),
-            );
+        let split = ver.split('.');
+        if let &[major, minor, branch, patch] = split
+            .filter_map(|v| v.parse::<usize>().ok())
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            let ver_tuple = (major, minor, branch, patch);
             if let Some(ver) = &latest_version {
                 if ver_tuple > *ver {
                     latest_version = Some(ver_tuple);
@@ -137,61 +197,67 @@ fn find_latest_version(version_list: &[String]) -> Option<(usize, usize, usize, 
     latest_version
 }
 
-fn get_build_list() -> Vec<String> {
-    let builds_json_path = get_cached_file_path("builds.json");
+fn get_build_list() -> Result<Vec<String>> {
+    let builds_json_path = get_cached_file_path("builds.json")?;
     if std::fs::try_exists(&builds_json_path).unwrap_or_default() {
         println!("==> using cached builds.");
-        serde_json::from_reader(BufReader::new(File::open(&builds_json_path).unwrap())).unwrap()
+        Ok(serde_json::from_reader(BufReader::new(File::open(
+            &builds_json_path,
+        )?))?)
     } else {
         println!("==> retrieving builds ...");
-        let page = ChromiumBuildsPage::new();
-        let builds: Vec<String> = page.flatten().collect();
-        std::fs::write(&builds_json_path, serde_json::to_string(&builds).unwrap()).unwrap();
-        builds
+        let pages = ChromiumBuildsPage::new();
+        let mut unwrapped_page_list = Vec::new();
+        for page in pages {
+            unwrapped_page_list.push(page?);
+        }
+        let builds: Vec<String> = unwrapped_page_list.into_iter().flatten().collect();
+        std::fs::write(&builds_json_path, serde_json::to_string(&builds)?)?;
+        Ok(builds)
     }
 }
 
-fn get_history_list() -> Vec<ChromiumHistoryInfo> {
-    let history_json_path = get_cached_file_path("history.json");
+fn get_history_list() -> Result<Vec<ChromiumHistoryInfo>> {
+    let history_json_path = get_cached_file_path("history.json")?;
     if std::fs::try_exists(&history_json_path).unwrap_or_default() {
         println!("==> using cached history.");
-        serde_json::from_reader(BufReader::new(File::open(&history_json_path).unwrap())).unwrap()
+        Ok(serde_json::from_reader(BufReader::new(File::open(
+            &history_json_path,
+        )?))?)
     } else {
         println!("==> retrieving history.json ...");
         let url = "https://omahaproxy.appspot.com/history.json?os=win&channel=stable";
-        let response = reqwest::blocking::get(url).unwrap();
-        let history_list: Vec<ChromiumHistoryInfo> = serde_json::from_reader(response).unwrap();
-        std::fs::write(
-            &history_json_path,
-            serde_json::to_string(&history_list).unwrap(),
-        )
-        .unwrap();
-        history_list
+        let response = reqwest::blocking::get(url)?;
+        let history_list: Vec<ChromiumHistoryInfo> = serde_json::from_reader(response)?;
+        std::fs::write(&history_json_path, serde_json::to_string(&history_list)?)?;
+        Ok(history_list)
     }
 }
 
-fn get_cached_file_path(file: &str) -> PathBuf {
+fn get_cached_file_path(file: &str) -> Result<PathBuf> {
     let mut path = PathBuf::new();
-    path.push(std::env::var("LOCALAPPDATA").unwrap());
+    path.push(std::env::var("LOCALAPPDATA")?);
     path.push("fetchchromium");
     if !path.exists() {
-        std::fs::create_dir_all(&path).unwrap();
+        std::fs::create_dir_all(&path)?;
     }
     path.push(file);
-    path
+    Ok(path)
 }
 
-fn fetch_build_detail(prefix: &str) -> Vec<GoogleApiStorageObject> {
+fn fetch_build_detail(prefix: &str) -> Result<Vec<GoogleApiStorageObject>> {
     let url = format!("https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o?delimiter=/&prefix={prefix}&fields=items(kind,mediaLink,metadata,name,size,updated),kind,prefixes,nextPageToken");
-    let response = reqwest::blocking::get(url).unwrap();
-    let build_detail: ChromiumBuildPage = serde_json::from_reader(response).unwrap();
-    build_detail.items
+    println!("==> fetching history {} ...", url);
+    let response = reqwest::blocking::get(url)?;
+    let build_detail: ChromiumBuildPage = serde_json::from_reader(response)?;
+    Ok(build_detail.items)
 }
 
-fn fetch_deps(version: &str) -> Option<ChromiumDepsInfo> {
+fn fetch_deps(version: &str) -> Result<ChromiumDepsInfo> {
     let url = format!("https://omahaproxy.appspot.com/deps.json?version={version}");
-    let response = reqwest::blocking::get(url).unwrap();
-    Some(serde_json::from_reader(response).unwrap())
+    println!("==> fetching deps {} ...", url);
+    let response = reqwest::blocking::get(url)?;
+    Ok(serde_json::from_reader(response)?)
 }
 
 fn find_history<'a>(
@@ -238,7 +304,7 @@ impl ChromiumBuildsPage {
 }
 
 impl Iterator for ChromiumBuildsPage {
-    type Item = Vec<String>;
+    type Item = Result<Vec<String>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
@@ -250,15 +316,19 @@ impl Iterator for ChromiumBuildsPage {
                 .map(|t| format!("&pageToken={}", t))
                 .unwrap_or_default();
             let url = format!("https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o?delimiter=/&prefix=Win_x64/&fields=items(kind,mediaLink,metadata,name,size,updated),kind,prefixes,nextPageToken{}", next_page_token);
-            let response = reqwest::blocking::get(url).unwrap();
-            let page: ChromiumBuildPage = serde_json::from_reader(response).unwrap();
-            self.next_page_token = page.next_page_token;
-            self.done = self.next_page_token.is_none();
-            if page.prefixes.is_empty() {
-                None
-            } else {
-                Some(page.prefixes)
-            }
+
+            let prefixes = reqwest::blocking::get(&url)
+                .map_err(|err| anyhow!("请求 {} 时出错：{:?}", url, err))
+                .and_then(|response| {
+                    let page: ChromiumBuildPage = serde_json::from_reader(response)?;
+                    self.next_page_token = page.next_page_token;
+                    self.done = self.next_page_token.is_none();
+                    Ok(page.prefixes)
+                });
+
+            prefixes
+                .map(|p| if p.is_empty() { None } else { Some(Ok(p)) })
+                .unwrap_or_else(|e| Some(Err(e)))
         }
     }
 }
@@ -305,9 +375,9 @@ pub(crate) struct ChromiumHistoryInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ChromiumDepsInfo {
-    chromium_base_commit: String,
-    chromium_base_position: String,
-    chromium_branch: String,
+    chromium_base_commit: Option<String>,
+    chromium_base_position: Option<String>,
+    chromium_branch: Option<String>,
     chromium_commit: String,
     chromium_version: String,
     skia_commit: String,

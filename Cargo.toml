@@ -2,8 +2,11 @@
 name = "fetchchromium"
 version = "0.1.0"
 edition = "2021"
+authors = ["hamflx <a@hamflx.cn>"]
 
 [dependencies]
+anyhow = "1.0.68"
+clap = { version = "4.1.1", features = ["derive"] }
 reqwest = { version = "0.11.13", features = ["blocking"] }
 serde = { version = "1.0.152", features = ["serde_derive"] }
 serde_json = "1.0"
