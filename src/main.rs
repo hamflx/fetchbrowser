@@ -1,20 +1,27 @@
 #![feature(fs_try_exists)]
 
+mod version;
+
 use std::{
     fs::{File, OpenOptions},
     io::{copy, BufReader},
     path::PathBuf,
     slice::Iter,
+    str::FromStr,
 };
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use version::ChromiumVersion;
 use zip::read::read_zipfile_from_stream;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    #[arg(short, long)]
+    os: Option<String>,
+
     #[arg()]
     chromium_version: String,
 }
@@ -27,9 +34,10 @@ fn main() {
 
 fn run() -> Result<()> {
     let args = Args::parse();
+    let os = args.os.as_deref().unwrap_or(std::env::consts::OS);
 
     // history.json 包含了 base_position 和版本号，根据用户提供的版本号，找到一个 base_position。
-    let history_list = get_history_list()?;
+    let history_list = get_history_list(os)?;
     let matched_history_list = find_history(history_list.iter(), &args.chromium_version);
     let mut chromium_base_position = None;
     for history in matched_history_list {
@@ -56,31 +64,26 @@ fn run() -> Result<()> {
         chromium_base_position.ok_or_else(|| anyhow!("未能根据版本号找到 position。"))?;
 
     // 然后遍历所有的版本信息，取得最近的可以下载的 position 的 prefix。
-    let builds = get_build_list()?;
+    let builds = get_build_list(os)?;
     let (prefix, revision) = find_builds(builds.iter(), chromium_base_position)
         .ok_or_else(|| anyhow!("未找到 position <= {} 的版本。", chromium_base_position))?;
     println!("==> found nearest revision: {}", revision);
 
     // 根据 prefix 找到该版本文件列表，以及 chrome-win.zip 文件信息。
     let build_files = fetch_build_detail(prefix)?;
-    let win_zip = build_files
-        .iter()
-        .find(|f| f.name.ends_with("chrome-win.zip"))
-        .or_else(|| {
-            build_files
-                .iter()
-                .find(|f| f.name.ends_with("chrome-win32.zip"))
-        })
+    let zip_file = ["chrome-win.zip", "chrome-win32.zip", "chrome-mac.zip"]
+        .into_iter()
+        .find_map(|f| build_files.iter().find(|file| file.name.ends_with(f)))
         .ok_or_else(|| {
             anyhow!(
-                "在版本 {} 中，未找到 chrome-win.zip/chrome-win32-zip。",
+                "在版本 {} 中，未找到 chrome-win.zip/chrome-win32-zip/chrome-mac.zip。",
                 prefix
             )
         })?;
 
     // 开始下载压缩文件。
-    println!("==> downloading {}", win_zip.media_link);
-    let mut win_zip_response = reqwest::blocking::get(&win_zip.media_link)?;
+    println!("==> downloading {}", zip_file.media_link);
+    let mut win_zip_response = reqwest::blocking::get(&zip_file.media_link)?;
 
     // 先保存到临时目录里面，待解压的时候，找到里面的版本信息，再重命名一下文件夹。
     let base_path = std::env::current_dir()?.join(format!("tmp-chromium-{}", revision));
@@ -112,16 +115,21 @@ fn run() -> Result<()> {
                     .unwrap_or(zip_name);
                 let manifest_name =
                     manifest_name[..manifest_name.len() - MANIFEST_SUFFIX.len()].to_owned();
-                if manifest_name
-                    .split('.')
-                    .into_iter()
-                    .all(|part| part.parse::<usize>().is_ok())
-                {
+                if ChromiumVersion::from_str(&manifest_name).is_ok() {
                     version_list.push(manifest_name);
                 }
             }
             let file_path = base_path.join(&zip_name[prefix.len()..]);
             if zip.is_dir() {
+                if version_list.is_empty() {
+                    if let Some(ver) = zip_name
+                        .rsplit('/')
+                        .nth(1)
+                        .and_then(|v| ChromiumVersion::from_str(v).ok())
+                    {
+                        version_list.push(ver.to_string());
+                    }
+                }
                 std::fs::create_dir_all(&file_path).map_err(|err| {
                     anyhow!(
                         "创建目录 {} 时出错：{:?}",
@@ -162,7 +170,7 @@ fn run() -> Result<()> {
 
     // 有些 chrome 压缩包内可能存在多个形如“版本号.manifest”的文件，这里是找到最新的一个版本号，然后作为最终目录名。
     let version = find_latest_version(&version_list)
-        .map(|(major, minor, branch, patch)| format!("{major}.{minor}.{branch}.{patch}"))
+        .map(|v| v.to_string())
         .unwrap_or_else(|| revision.to_string());
     let dest_path = std::env::current_dir()?.join(format!("chromium-{}", version));
     println!(
@@ -175,30 +183,24 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn find_latest_version(version_list: &[String]) -> Option<(usize, usize, usize, usize)> {
+fn find_latest_version(version_list: &[String]) -> Option<ChromiumVersion> {
     let mut latest_version = None;
     version_list.iter().for_each(|ver| {
-        let split = ver.split('.');
-        if let &[major, minor, branch, patch] = split
-            .filter_map(|v| v.parse::<usize>().ok())
-            .collect::<Vec<_>>()
-            .as_slice()
-        {
-            let ver_tuple = (major, minor, branch, patch);
-            if let Some(ver) = &latest_version {
-                if ver_tuple > *ver {
-                    latest_version = Some(ver_tuple);
+        if let Ok(ver) = ChromiumVersion::from_str(ver) {
+            if let Some(prev) = &latest_version {
+                if ver > *prev {
+                    latest_version = Some(ver);
                 }
             } else {
-                latest_version = Some(ver_tuple);
+                latest_version = Some(ver);
             }
         }
     });
     latest_version
 }
 
-fn get_build_list() -> Result<Vec<String>> {
-    let builds_json_path = get_cached_file_path("builds.json")?;
+fn get_build_list(os: &str) -> Result<Vec<String>> {
+    let builds_json_path = get_cached_file_path(&format!("builds-{}.json", os))?;
     if std::fs::try_exists(&builds_json_path).unwrap_or_default() {
         println!("==> using cached builds.");
         Ok(serde_json::from_reader(BufReader::new(File::open(
@@ -206,7 +208,7 @@ fn get_build_list() -> Result<Vec<String>> {
         )?))?)
     } else {
         println!("==> retrieving builds ...");
-        let pages = ChromiumBuildsPage::new();
+        let pages = ChromiumBuildsPage::new(os)?;
         let mut unwrapped_page_list = Vec::new();
         for page in pages {
             unwrapped_page_list.push(page?);
@@ -217,8 +219,8 @@ fn get_build_list() -> Result<Vec<String>> {
     }
 }
 
-fn get_history_list() -> Result<Vec<ChromiumHistoryInfo>> {
-    let history_json_path = get_cached_file_path("history.json")?;
+fn get_history_list(os: &str) -> Result<Vec<ChromiumHistoryInfo>> {
+    let history_json_path = get_cached_file_path(&format!("history-{}.json", os))?;
     if std::fs::try_exists(&history_json_path).unwrap_or_default() {
         println!("==> using cached history.");
         Ok(serde_json::from_reader(BufReader::new(File::open(
@@ -226,7 +228,12 @@ fn get_history_list() -> Result<Vec<ChromiumHistoryInfo>> {
         )?))?)
     } else {
         println!("==> retrieving history.json ...");
-        let url = "https://omahaproxy.appspot.com/history.json?os=win&channel=stable";
+        let os_arg = match os {
+            "windows" => "win64",
+            "macos" => "mac",
+            _ => return Err(anyhow!("不支持的操作系统：{}", os)),
+        };
+        let url = format!("https://omahaproxy.appspot.com/history.json?os={os_arg}&channel=stable");
         let response = reqwest::blocking::get(url)?;
         let history_list: Vec<ChromiumHistoryInfo> = serde_json::from_reader(response)?;
         std::fs::write(&history_json_path, serde_json::to_string(&history_list)?)?;
@@ -250,6 +257,10 @@ fn fetch_build_detail(prefix: &str) -> Result<Vec<GoogleApiStorageObject>> {
     println!("==> fetching history {} ...", url);
     let response = reqwest::blocking::get(url)?;
     let build_detail: ChromiumBuildPage = serde_json::from_reader(response)?;
+    println!("==> files:");
+    for file in &build_detail.items {
+        println!("    {}", file.name);
+    }
     Ok(build_detail.items)
 }
 
@@ -271,18 +282,13 @@ fn find_history<'a>(
 }
 
 fn find_builds(build_list: Iter<String>, find_pos: usize) -> Option<(&String, usize)> {
-    let prefix = "Win_x64/";
     let mut list: Vec<_> = build_list
         .filter_map(|build| {
-            if build.starts_with(prefix) {
-                if let Ok(build_pos) = build[prefix.len()..build.len() - 1].parse::<usize>() {
-                    Some((build, build_pos))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            build
+                .split('/')
+                .nth(1)
+                .and_then(|rev| rev.parse::<usize>().ok())
+                .map(|rev| (build, rev))
         })
         .collect();
     list.sort_by(|a, b| a.1.cmp(&b.1));
@@ -290,16 +296,22 @@ fn find_builds(build_list: Iter<String>, find_pos: usize) -> Option<(&String, us
 }
 
 pub(crate) struct ChromiumBuildsPage {
+    prefix: &'static str,
     next_page_token: Option<String>,
     done: bool,
 }
 
 impl ChromiumBuildsPage {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(os: &str) -> Result<Self> {
+        Ok(Self {
             next_page_token: None,
             done: false,
-        }
+            prefix: match os {
+                "windows" => "Win_x64/",
+                "macos" => "Mac/",
+                _ => return Err(anyhow!("不支持的操作系统：{}", os)),
+            },
+        })
     }
 }
 
@@ -315,7 +327,7 @@ impl Iterator for ChromiumBuildsPage {
                 .as_ref()
                 .map(|t| format!("&pageToken={}", t))
                 .unwrap_or_default();
-            let url = format!("https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o?delimiter=/&prefix=Win_x64/&fields=items(kind,mediaLink,metadata,name,size,updated),kind,prefixes,nextPageToken{}", next_page_token);
+            let url = format!("https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o?delimiter=/&prefix={}&fields=items(kind,mediaLink,metadata,name,size,updated),kind,prefixes,nextPageToken{}", self.prefix, next_page_token);
 
             let prefixes = reqwest::blocking::get(&url)
                 .map_err(|err| anyhow!("请求 {} 时出错：{:?}", url, err))
