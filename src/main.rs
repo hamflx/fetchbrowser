@@ -25,7 +25,7 @@ fn main() {
     }
 }
 
-fn run() -> anyhow::Result<()> {
+fn run() -> Result<()> {
     let args = Args::parse();
 
     // history.json 包含了 base_position 和版本号，根据用户提供的版本号，找到一个 base_position。
@@ -58,7 +58,7 @@ fn run() -> anyhow::Result<()> {
     // 然后遍历所有的版本信息，取得最近的可以下载的 position 的 prefix。
     let builds = get_build_list()?;
     let (prefix, revision) = find_builds(builds.iter(), chromium_base_position)
-        .ok_or_else(|| anyhow::anyhow!("未找到 position <= {} 的版本。", chromium_base_position))?;
+        .ok_or_else(|| anyhow!("未找到 position <= {} 的版本。", chromium_base_position))?;
     println!("==> found nearest revision: {}", revision);
 
     // 根据 prefix 找到该版本文件列表，以及 chrome-win.zip 文件信息。
@@ -72,7 +72,7 @@ fn run() -> anyhow::Result<()> {
                 .find(|f| f.name.ends_with("chrome-win32.zip"))
         })
         .ok_or_else(|| {
-            anyhow::anyhow!(
+            anyhow!(
                 "在版本 {} 中，未找到 chrome-win.zip/chrome-win32-zip。",
                 prefix
             )
@@ -93,7 +93,7 @@ fn run() -> anyhow::Result<()> {
         let mut zip = match read_zipfile_from_stream(&mut win_zip_response) {
             Ok(Some(zip)) => zip,
             Ok(None) => break,
-            Err(err) => panic!("Error: {:?}", err),
+            Err(err) => return Err(anyhow!("读取压缩文件出错: {:?}", err)),
         };
 
         let zip_name = zip.name();
@@ -101,7 +101,7 @@ fn run() -> anyhow::Result<()> {
             if zip.is_dir() {
                 prefix = zip.name().to_owned();
             } else {
-                panic!("Invalid zip file");
+                return Err(anyhow!("压缩包内目录结构不正确。"));
             }
         } else if zip_name.starts_with(&prefix) {
             const MANIFEST_SUFFIX: &str = ".manifest";
@@ -154,7 +154,7 @@ fn run() -> anyhow::Result<()> {
                 })?;
             }
         } else {
-            panic!("Invalid file name");
+            return Err(anyhow!("压缩包文件结构不正确。"));
         }
 
         println!("==> unzip: {}", zip.name());
