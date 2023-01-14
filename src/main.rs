@@ -243,7 +243,7 @@ fn get_history_list(os: &str) -> Result<Vec<ChromiumHistoryInfo>> {
 
 fn get_cached_file_path(file: &str) -> Result<PathBuf> {
     let mut path = PathBuf::new();
-    path.push(std::env::var("LOCALAPPDATA")?);
+    path.push(std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("HOME"))?);
     path.push("fetchchromium");
     if !path.exists() {
         std::fs::create_dir_all(&path)?;
