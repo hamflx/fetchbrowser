@@ -1,25 +1,21 @@
 use std::{fs::File, io::BufReader};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::get_cached_file_path;
+use crate::{platform::Platform, utils::get_cached_file_path};
 
 pub(crate) struct ChromiumHistory(Vec<ChromiumHistoryInfo>);
 
 impl ChromiumHistory {
-    pub(crate) fn init(os: &str) -> Result<Self> {
-        let history_json_path = get_cached_file_path(&format!("history-{os}.json"))?;
+    pub(crate) fn init(platform: Platform) -> Result<Self> {
+        let os_arg = platform.arg_name();
+        let history_json_path = get_cached_file_path(&format!("history-{os_arg}.json"))?;
         let history_list = if std::fs::try_exists(&history_json_path).unwrap_or_default() {
             println!("==> using cached history.");
             serde_json::from_reader(BufReader::new(File::open(&history_json_path)?))?
         } else {
             println!("==> retrieving history.json ...");
-            let os_arg = match os {
-                "windows" => "win64",
-                "macos" => "mac",
-                _ => return Err(anyhow!("不支持的操作系统：{}", os)),
-            };
             let url =
                 format!("https://omahaproxy.appspot.com/history.json?os={os_arg}&channel=stable");
             let response = reqwest::blocking::get(url)?;

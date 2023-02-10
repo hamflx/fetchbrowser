@@ -3,19 +3,20 @@ use std::{fs::File, io::BufReader};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::utils::get_cached_file_path;
+use crate::{platform::Platform, utils::get_cached_file_path};
 
 pub(crate) struct ChromiumBuilds(Vec<String>);
 
 impl ChromiumBuilds {
-    pub(crate) fn init(os: &str) -> Result<Self> {
-        let builds_json_path = get_cached_file_path(&format!("builds-{os}.json"))?;
+    pub(crate) fn init(platform: Platform) -> Result<Self> {
+        let prefix = platform.prefix();
+        let builds_json_path = get_cached_file_path(&format!("builds-{prefix}.json"))?;
         let build_list = if std::fs::try_exists(&builds_json_path).unwrap_or_default() {
             println!("==> using cached builds.");
             serde_json::from_reader(BufReader::new(File::open(&builds_json_path)?))?
         } else {
             println!("==> retrieving builds ...");
-            let pages = ChromiumBuildsPage::new(os)?;
+            let pages = ChromiumBuildsPage::new(prefix)?;
             let mut unwrapped_page_list = Vec::new();
             for page in pages {
                 unwrapped_page_list.push(page?);
@@ -56,11 +57,11 @@ pub(crate) struct ChromiumBuildsPage {
 }
 
 impl ChromiumBuildsPage {
-    pub fn new(os: &str) -> Result<Self> {
+    pub fn new(prefix: &'static str) -> Result<Self> {
         Ok(Self {
             next_page_token: None,
             done: false,
-            prefix: get_os_prefix(os)?,
+            prefix,
         })
     }
 }
@@ -114,12 +115,4 @@ pub(crate) struct GoogleApiStorageObject {
     pub(crate) name: String,
     pub(crate) size: String,
     pub(crate) updated: String,
-}
-
-pub(crate) fn get_os_prefix(os: &str) -> Result<&'static str> {
-    match os {
-        "windows" => Ok("Win_x64"),
-        "macos" => Ok("Mac"),
-        _ => Err(anyhow!("不支持的操作系统：{}", os)),
-    }
 }
