@@ -25,3 +25,7 @@ fb 98
 ```powershell
 fb --firefox 98
 ```
+
+## 许可
+
+MIT @ 2023 hamflx
