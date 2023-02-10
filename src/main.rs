@@ -1,6 +1,7 @@
 #![feature(fs_try_exists)]
 
 mod builds;
+mod ff;
 mod history;
 mod platform;
 mod utils;
@@ -11,6 +12,7 @@ use std::{fs::OpenOptions, io::copy, path::Path, str::FromStr};
 use anyhow::{anyhow, Result};
 use builds::{ChromiumBuilds, GoogleApiStorageObject};
 use clap::Parser;
+use ff::download_ff;
 use history::ChromiumHistory;
 use platform::{Arch, Os, Platform};
 use zip::read::read_zipfile_from_stream;
@@ -24,7 +26,7 @@ struct Args {
     os: Option<String>,
 
     #[arg()]
-    chromium_version: String,
+    browser_version: String,
 }
 
 fn main() {
@@ -35,16 +37,21 @@ fn main() {
 
 fn run() -> Result<()> {
     let args = Args::parse();
-    let os = Os::from_str(args.os.as_deref().unwrap_or(std::env::consts::OS))?;
-    let x64platform = Platform::new(os, Arch::X86_64);
-    if let Err(err) = download_chromium(&args.chromium_version, x64platform) {
-        // todo 这里不要无脑回退下载 x86，应该在版本找不到的时候才下载 x86 版本的。
-        let x86platform = Platform::new(os, Arch::X86);
-        if !x64platform.eq_impl(&x86platform) {
-            println!("==> 下载 x64 版本出错，尝试 x86: {err}");
-            download_chromium(&args.chromium_version, x86platform)?;
-        } else {
-            return Err(err);
+    if args.browser_version.starts_with("ff") {
+        let ff_version = &args.browser_version[2..];
+        download_ff(ff_version)?;
+    } else {
+        let os = Os::from_str(args.os.as_deref().unwrap_or(std::env::consts::OS))?;
+        let x64platform = Platform::new(os, Arch::X86_64);
+        if let Err(err) = download_chromium(&args.browser_version, x64platform) {
+            // todo 这里不要无脑回退下载 x86，应该在版本找不到的时候才下载 x86 版本的。
+            let x86platform = Platform::new(os, Arch::X86);
+            if !x64platform.eq_impl(&x86platform) {
+                println!("==> 下载 x64 版本出错，尝试 x86: {err}");
+                download_chromium(&args.browser_version, x86platform)?;
+            } else {
+                return Err(err);
+            }
         }
     }
     Ok(())

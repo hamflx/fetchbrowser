@@ -12,3 +12,7 @@ pub(crate) fn get_cached_file_path(file: &str) -> Result<PathBuf> {
     path.push(file);
     Ok(path)
 }
+
+pub(crate) fn find_sequence<T: PartialEq>(haystack: &[T], needle: &[T]) -> Option<usize> {
+    (0..haystack.len() - needle.len() + 1).find(|&i| haystack[i..i + needle.len()] == needle[..])
+}
