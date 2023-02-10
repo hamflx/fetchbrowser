@@ -133,8 +133,6 @@ fn download_zip_file(
     println!("==> downloading {}", zip_file.media_link);
     let mut win_zip_response = reqwest::blocking::get(&zip_file.media_link)?;
 
-    // 执行 zip 解压过程，并去除压缩包的根目录。
-    let mut prefix = String::new();
     loop {
         let mut zip = match read_zipfile_from_stream(&mut win_zip_response) {
             Ok(Some(zip)) => zip,
@@ -145,14 +143,13 @@ fn download_zip_file(
         let zip_name = zip.name();
         println!("==> unzip: {zip_name}");
 
-        if prefix.is_empty() {
-            if zip.is_dir() {
-                prefix = zip.name().to_owned();
-            } else {
-                return Err(anyhow!("压缩包内目录结构不正确。"));
-            }
-        } else if zip_name.starts_with(&prefix) {
-            let file_path = base_path.join(&zip_name[prefix.len()..]);
+        if zip_name.starts_with("chrome-win/")
+            || zip_name.starts_with("chrome-win32/")
+            || zip_name.starts_with("chrome-mac/")
+            || zip_name.starts_with("chrome-linux/")
+        {
+            let prefix_len = zip_name.find('/').unwrap() + 1;
+            let file_path = base_path.join(&zip_name[prefix_len..]);
             if zip.is_dir() {
                 std::fs::create_dir_all(&file_path).map_err(|err| {
                     anyhow!(
@@ -162,6 +159,9 @@ fn download_zip_file(
                     )
                 })?;
             } else {
+                if let Some(parent_dir) = file_path.parent() {
+                    let _ = std::fs::create_dir_all(parent_dir);
+                }
                 copy(
                     &mut zip,
                     &mut OpenOptions::new()

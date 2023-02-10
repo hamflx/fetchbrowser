@@ -1,8 +1,10 @@
 [package]
 name = "fetchbrowser"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["hamflx <a@hamflx.cn>"]
+license = "MIT"
+license-file = "LICENSE"
 
 [[bin]]
 name = "fb"
