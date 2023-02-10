@@ -90,15 +90,20 @@ fn download_chromium(chromium_version: &str, platform: Platform) -> Result<()> {
 
     // 根据 prefix 找到该版本文件列表，以及 chrome-win.zip 文件信息。
     let build_files = fetch_build_detail(found_prefix)?;
-    let zip_file = ["chrome-win.zip", "chrome-win32.zip", "chrome-mac.zip"]
-        .into_iter()
-        .find_map(|f| build_files.iter().find(|file| file.name.ends_with(f)))
-        .ok_or_else(|| {
-            anyhow!(
-                "在版本 {} 中，未找到 chrome-win.zip/chrome-win32-zip/chrome-mac.zip。",
-                found_prefix
-            )
-        })?;
+    let zip_file = [
+        "chrome-win.zip",
+        "chrome-win32.zip",
+        "chrome-mac.zip",
+        "chrome-linux.zip",
+    ]
+    .into_iter()
+    .find_map(|f| build_files.iter().find(|file| file.name.ends_with(f)))
+    .ok_or_else(|| {
+        anyhow!(
+            "在版本 {} 中，未找到 chrome-win.zip/chrome-win32-zip/chrome-mac.zip。",
+            found_prefix
+        )
+    })?;
 
     // 先保存到临时目录里面，待解压的时候，找到里面的版本信息，再重命名一下文件夹。
     let base_path = std::env::current_dir()?.join(format!("chromium-{found_chromium_ver}"));
