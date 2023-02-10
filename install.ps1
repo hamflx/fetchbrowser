@@ -19,8 +19,8 @@ Write-Host Dowloading latest release
 Invoke-WebRequest $download -Out $fb_bin_path
 
 $old_path = [System.Environment]::GetEnvironmentVariable("PATH", "User")
-if (!(";${old_path};".ToLower() -like "*;${fb_bin_path};*".ToLower())) {
-  $new_path = $old_path + [IO.Path]::PathSeparator + $fb_bin_path
+if (!(";${old_path};".ToLower() -like "*;${fb_bin_dir};*".ToLower())) {
+  $new_path = $old_path + [IO.Path]::PathSeparator + $fb_bin_dir
   [Environment]::SetEnvironmentVariable("PATH", $new_path, "User")
-  $Env:Path += ";${fb_bin_path}"
+  $Env:Path += ";${fb_bin_dir}"
 }
