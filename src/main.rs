@@ -27,6 +27,12 @@ struct Args {
 
     #[arg()]
     browser_version: String,
+
+    #[arg(long)]
+    chrome: bool,
+
+    #[arg(long)]
+    firefox: bool,
 }
 
 fn main() {
@@ -37,10 +43,8 @@ fn main() {
 
 fn run() -> Result<()> {
     let args = Args::parse();
-    if args.browser_version.starts_with("ff") {
-        let ff_version = &args.browser_version[2..];
-        download_ff(ff_version)?;
-    } else {
+    let no_browser_specified = !args.chrome && !args.firefox;
+    if args.chrome || no_browser_specified {
         let os = Os::from_str(args.os.as_deref().unwrap_or(std::env::consts::OS))?;
         let x64platform = Platform::new(os, Arch::X86_64);
         if let Err(err) = download_chromium(&args.browser_version, x64platform) {
@@ -53,6 +57,9 @@ fn run() -> Result<()> {
                 return Err(err);
             }
         }
+    }
+    if args.firefox {
+        download_ff(&args.browser_version)?;
     }
     Ok(())
 }
