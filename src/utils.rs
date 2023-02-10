@@ -5,7 +5,7 @@ use anyhow::Result;
 pub(crate) fn get_cached_file_path(file: &str) -> Result<PathBuf> {
     let mut path = PathBuf::new();
     path.push(std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("HOME"))?);
-    path.push("fetchchromium");
+    path.push("fetchbrowser");
     if !path.exists() {
         std::fs::create_dir_all(&path)?;
     }
