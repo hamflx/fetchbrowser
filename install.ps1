@@ -13,7 +13,7 @@ $fb_dir = "${HOME}\.fb"
 $fb_bin_dir = "${fb_dir}\bin"
 $fb_bin_path = "${fb_bin_dir}\$file"
 
-New-Item "${fb_bin_dir}" -ItemType Directory -Force
+New-Item "${fb_bin_dir}" -ItemType Directory -Force | Out-Null
 
 Write-Host Dowloading latest release
 Invoke-WebRequest $download -Out $fb_bin_path
@@ -24,3 +24,5 @@ if (!(";${old_path};".ToLower() -like "*;${fb_bin_dir};*".ToLower())) {
   [Environment]::SetEnvironmentVariable("PATH", $new_path, "User")
   $Env:Path += ";${fb_bin_dir}"
 }
+
+Write-Host "Installation successfully. ``fb`` is now available in your PATH."
