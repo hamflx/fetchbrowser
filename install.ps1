@@ -26,3 +26,4 @@ if (!(";${old_path};".ToLower() -like "*;${fb_bin_dir};*".ToLower())) {
 }
 
 Write-Host "Installation successfully. ``fb`` is now available in your PATH."
+Write-Host "Example: ``fb 98`` to download Chromium 98."
