@@ -78,9 +78,11 @@ impl FirefoxVersionSpider {
     pub(crate) fn init() -> Result<Self> {
         let cached_releases_path = get_cached_file_path("firefox-releases.json")?;
         if cached_releases_path.exists() {
+            println!("==> using cached firefox releases");
             let releases = serde_json::from_reader(std::fs::File::open(cached_releases_path)?)?;
             Ok(Self(releases))
         } else {
+            println!("==> fetching firefox releases from ftp.mozilla.org ...");
             let response =
                 reqwest::blocking::get("https://ftp.mozilla.org/pub/firefox/releases/")?.text()?;
             let doc = Document::from(response.as_str());
