@@ -65,6 +65,7 @@ fn download_browser<B: BrowserReleases>(chromium_version: &str, platform: Platfo
     let matched_version_list = fetcher.match_version(chromium_version);
     for release in matched_version_list.into_iter() {
         release?.download()?;
+        return Ok(());
     }
-    Ok(())
+    Err(anyhow::anyhow!("No matched version found."))
 }
