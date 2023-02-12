@@ -96,6 +96,18 @@ impl Iterator for ChromiumBuildsPage {
     }
 }
 
+pub(crate) fn fetch_build_detail(prefix: &str) -> Result<Vec<GoogleApiStorageObject>> {
+    let url = format!("https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o?delimiter=/&prefix={prefix}&fields=items(kind,mediaLink,metadata,name,size,updated),kind,prefixes,nextPageToken");
+    println!("==> fetching history {url} ...");
+    let response = reqwest::blocking::get(url)?;
+    let build_detail: ChromiumBuildPage = serde_json::from_reader(response)?;
+    println!("==> files:");
+    for file in &build_detail.items {
+        println!("    {}", file.name);
+    }
+    Ok(build_detail.items)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChromiumBuildPage {

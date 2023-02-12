@@ -10,7 +10,7 @@ use select::{
 
 use crate::utils::{find_sequence, get_cached_file_path};
 
-pub(crate) fn download_ff(version: &str) -> Result<()> {
+pub(crate) fn download_firefox(version: &str) -> Result<()> {
     let cur_dir = current_dir()?;
 
     let spider = FirefoxVersionSpider::init()?;
@@ -19,9 +19,9 @@ pub(crate) fn download_ff(version: &str) -> Result<()> {
         .first()
         .ok_or_else(|| anyhow!("No matched version found"))?;
 
-    let zip_content = download_ff_zip(matched_version, "win64").or_else(|err| {
+    let zip_content = download_firefox_zip(matched_version, "win64").or_else(|err| {
         println!("==> download firefox win64 failed: {err}, trying win32 ...");
-        download_ff_zip(matched_version, "win32")
+        download_firefox_zip(matched_version, "win32")
     })?;
 
     let base_path = cur_dir.join(format!(".tmp-firefox-{matched_version}"));
@@ -46,7 +46,7 @@ pub(crate) fn download_ff(version: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn download_ff_zip(version: &str, arch: &str) -> Result<Bytes> {
+fn download_firefox_zip(version: &str, arch: &str) -> Result<Bytes> {
     let cur_dir = current_dir()?;
     let url = format!(
         "https://ftp.mozilla.org/pub/firefox/releases/{version}/{arch}/zh-CN/Firefox%20Setup%20{version}.exe"
@@ -72,10 +72,10 @@ pub(crate) fn download_ff_zip(version: &str, arch: &str) -> Result<Bytes> {
 }
 
 #[derive(Debug)]
-pub(crate) struct FirefoxVersionSpider(Vec<String>);
+struct FirefoxVersionSpider(Vec<String>);
 
 impl FirefoxVersionSpider {
-    pub(crate) fn init() -> Result<Self> {
+    fn init() -> Result<Self> {
         let cached_releases_path = get_cached_file_path("firefox-releases.json")?;
         if cached_releases_path.exists() {
             println!("==> using cached firefox releases");
@@ -93,7 +93,7 @@ impl FirefoxVersionSpider {
                         .descendant(predicate::Name("a")),
                 )
                 .map(|node| node.text().trim_end_matches('/').to_owned())
-                .filter(|name| is_valid_version(name.as_str()))
+                .filter(|name| is_valid_ff_version(name.as_str()))
                 .collect::<Vec<_>>();
 
             std::fs::write(&cached_releases_path, serde_json::to_string(&releases)?)?;
@@ -102,7 +102,7 @@ impl FirefoxVersionSpider {
         }
     }
 
-    pub(crate) fn find(&self, version: &str) -> Vec<&String> {
+    fn find(&self, version: &str) -> Vec<&String> {
         let mut matched_list = self
             .0
             .iter()
@@ -127,7 +127,7 @@ impl FirefoxVersionSpider {
     }
 }
 
-pub(crate) fn is_valid_version(version: &str) -> bool {
+fn is_valid_ff_version(version: &str) -> bool {
     let mut split = version.split('.');
     match (split.next(), split.next()) {
         (Some(first), Some(second)) => {
