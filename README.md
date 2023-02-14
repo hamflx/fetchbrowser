@@ -12,6 +12,10 @@ Enter the following command in Powershell:
 
 ```powershell
 irm https://raw.githubusercontent.com/hamflx/fetchbrowser/master/install.ps1 | iex
+
+# 中国大陆用户，可以使用 gitee 镜像以加速下载（注意，可能会更新不及时）。
+# Chinese mainland users can use the Gitee mirror to speed up downloads (note that updates may not be timely).
+irm https://gitee.com/hamflx/fetchbrowser/raw/master/install-cn.ps1 | iex
 ```
 
 ## 使用（Usage）
