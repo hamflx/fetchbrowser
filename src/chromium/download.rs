@@ -1,6 +1,7 @@
 use std::{fs::OpenOptions, io::copy, path::Path};
 
 use anyhow::anyhow;
+use reqwest::blocking::Client;
 use zip::read::read_zipfile_from_stream;
 
 use super::builds::GoogleApiStorageObject;
@@ -8,10 +9,11 @@ use super::builds::GoogleApiStorageObject;
 pub(crate) fn download_chromium_zip_file(
     zip_file: &GoogleApiStorageObject,
     base_path: &Path,
+    client: &Client,
 ) -> std::result::Result<(), anyhow::Error> {
     // 开始下载压缩文件。
     println!("==> downloading {}", zip_file.media_link);
-    let mut win_zip_response = reqwest::blocking::get(&zip_file.media_link)?;
+    let mut win_zip_response = client.get(&zip_file.media_link).send()?;
 
     loop {
         let mut zip = match read_zipfile_from_stream(&mut win_zip_response) {

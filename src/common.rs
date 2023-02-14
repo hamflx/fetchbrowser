@@ -1,4 +1,5 @@
 use anyhow::Result;
+use reqwest::blocking::Client;
 
 use crate::platform::Platform;
 
@@ -8,7 +9,7 @@ pub(crate) trait BrowserReleases {
     where
         Self: 'r;
 
-    fn init(platform: Platform) -> Result<Self>
+    fn init(platform: Platform, client: Client) -> Result<Self>
     where
         Self: Sized;
 

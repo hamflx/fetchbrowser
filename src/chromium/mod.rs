@@ -1,6 +1,7 @@
 use std::vec::IntoIter;
 
 use anyhow::{anyhow, Result};
+use reqwest::blocking::Client;
 
 use crate::{
     common::{BrowserReleaseItem, BrowserReleases},
@@ -22,24 +23,26 @@ pub(crate) struct ChromiumReleases {
     platform: Platform,
     history: ChromiumHistory,
     builds: ChromiumBuilds,
+    client: Client,
 }
 
 impl BrowserReleases for ChromiumReleases {
     type ReleaseItem = ChromiumReleaseItem;
     type Matches<'r> = ChromiumReleaseMatches<'r>;
 
-    fn init(platform: Platform) -> anyhow::Result<Self>
+    fn init(platform: Platform, client: Client) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
         // history.json 包含了 base_position 和版本号。
-        let history = ChromiumHistory::init(platform)?;
+        let history = ChromiumHistory::init(platform, client.clone())?;
         // builds 包含了所有可下载的 position 信息。
-        let builds = ChromiumBuilds::init(platform)?;
+        let builds = ChromiumBuilds::init(platform, client.clone())?;
         Ok(Self {
             platform,
             history,
             builds,
+            client,
         })
     }
 
@@ -70,7 +73,7 @@ impl<'r> Iterator for ChromiumReleaseMatches<'r> {
 
     fn next(&mut self) -> Option<Self::Item> {
         for history in self.iter.by_ref() {
-            let deps = match history.deps() {
+            let deps = match history.deps(&self.releases.client) {
                 Ok(deps) => deps,
                 Err(err) => return Some(Err(err)),
             };
@@ -81,6 +84,7 @@ impl<'r> Iterator for ChromiumReleaseMatches<'r> {
                             return Some(Ok(ChromiumReleaseItem {
                                 rev_prefix: rev_prefix.clone(),
                                 version: deps.chromium_version,
+                                client: self.releases.client.clone(),
                             }))
                         }
                         None => println!("==> no build found for rev: {pos}"),
@@ -103,12 +107,13 @@ impl<'r> Iterator for ChromiumReleaseMatches<'r> {
 pub(crate) struct ChromiumReleaseItem {
     rev_prefix: String,
     version: String,
+    client: Client,
 }
 
 impl BrowserReleaseItem for ChromiumReleaseItem {
     fn download(&self) -> Result<()> {
         // 根据 prefix 找到该版本文件列表，以及 chrome-win.zip 文件信息。
-        let build_files = fetch_build_detail(&self.rev_prefix)?;
+        let build_files = fetch_build_detail(&self.rev_prefix, &self.client)?;
         let zip_file = [
             "chrome-win.zip",
             "chrome-win32.zip",
@@ -127,6 +132,6 @@ impl BrowserReleaseItem for ChromiumReleaseItem {
         // 先保存到临时目录里面，待解压的时候，找到里面的版本信息，再重命名一下文件夹。
         let base_path = std::env::current_dir()?.join(format!("chromium-{}", self.version));
         std::fs::create_dir_all(&base_path)?;
-        download_chromium_zip_file(zip_file, &base_path)
+        download_chromium_zip_file(zip_file, &base_path, &self.client)
     }
 }

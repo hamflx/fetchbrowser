@@ -1,6 +1,7 @@
 use std::{fs::File, io::BufReader};
 
 use anyhow::{anyhow, Result};
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::{platform::Platform, utils::get_cached_file_path};
@@ -8,7 +9,7 @@ use crate::{platform::Platform, utils::get_cached_file_path};
 pub(crate) struct ChromiumBuilds(Vec<String>);
 
 impl ChromiumBuilds {
-    pub(crate) fn init(platform: Platform) -> Result<Self> {
+    pub(crate) fn init(platform: Platform, client: Client) -> Result<Self> {
         let prefix = platform.prefix();
         let builds_json_path = get_cached_file_path(&format!("builds-{prefix}.json"))?;
         let build_list = if std::fs::try_exists(&builds_json_path).unwrap_or_default() {
@@ -16,7 +17,7 @@ impl ChromiumBuilds {
             serde_json::from_reader(BufReader::new(File::open(&builds_json_path)?))?
         } else {
             println!("==> retrieving builds ...");
-            let pages = ChromiumBuildsPage::new(prefix)?;
+            let pages = ChromiumBuildsPage::new(prefix, client)?;
             let mut unwrapped_page_list = Vec::new();
             for page in pages {
                 unwrapped_page_list.push(page?);
@@ -54,14 +55,16 @@ pub(crate) struct ChromiumBuildsPage {
     prefix: &'static str,
     next_page_token: Option<String>,
     done: bool,
+    client: Client,
 }
 
 impl ChromiumBuildsPage {
-    pub fn new(prefix: &'static str) -> Result<Self> {
+    pub fn new(prefix: &'static str, client: Client) -> Result<Self> {
         Ok(Self {
             next_page_token: None,
             done: false,
             prefix,
+            client,
         })
     }
 }
@@ -80,7 +83,10 @@ impl Iterator for ChromiumBuildsPage {
                 .unwrap_or_default();
             let url = format!("https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o?delimiter=/&prefix={}/&fields=items(kind,mediaLink,metadata,name,size,updated),kind,prefixes,nextPageToken{}", self.prefix, next_page_token);
 
-            let prefixes = reqwest::blocking::get(&url)
+            let prefixes = self
+                .client
+                .get(&url)
+                .send()
                 .map_err(|err| anyhow!("请求 {} 时出错：{:?}", url, err))
                 .and_then(|response| {
                     let page: ChromiumBuildPage = serde_json::from_reader(response)?;
@@ -96,10 +102,13 @@ impl Iterator for ChromiumBuildsPage {
     }
 }
 
-pub(crate) fn fetch_build_detail(prefix: &str) -> Result<Vec<GoogleApiStorageObject>> {
+pub(crate) fn fetch_build_detail(
+    prefix: &str,
+    client: &Client,
+) -> Result<Vec<GoogleApiStorageObject>> {
     let url = format!("https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o?delimiter=/&prefix={prefix}&fields=items(kind,mediaLink,metadata,name,size,updated),kind,prefixes,nextPageToken");
     println!("==> fetching history {url} ...");
-    let response = reqwest::blocking::get(url)?;
+    let response = client.get(url).send()?;
     let build_detail: ChromiumBuildPage = serde_json::from_reader(response)?;
     println!("==> files:");
     for file in &build_detail.items {

@@ -3,6 +3,7 @@ use std::{cmp::Ordering, env::current_dir, fs::create_dir_all, io::Cursor};
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use compress_tools::{uncompress_archive, Ownership};
+use reqwest::blocking::Client;
 use select::{
     document::Document,
     predicate::{self, Predicate},
@@ -10,18 +11,18 @@ use select::{
 
 use crate::utils::{find_sequence, get_cached_file_path};
 
-pub(crate) fn download_firefox(version: &str) -> Result<()> {
+pub(crate) fn download_firefox(version: &str, client: &Client) -> Result<()> {
     let cur_dir = current_dir()?;
 
-    let spider = FirefoxVersionSpider::init()?;
+    let spider = FirefoxVersionSpider::init(client)?;
     let matched_version_list = spider.find(version);
     let matched_version = matched_version_list
         .first()
         .ok_or_else(|| anyhow!("No matched version found"))?;
 
-    let zip_content = download_firefox_zip(matched_version, "win64").or_else(|err| {
+    let zip_content = download_firefox_zip(matched_version, "win64", client).or_else(|err| {
         println!("==> download firefox win64 failed: {err}, trying win32 ...");
-        download_firefox_zip(matched_version, "win32")
+        download_firefox_zip(matched_version, "win32", client)
     })?;
 
     let base_path = cur_dir.join(format!(".tmp-firefox-{matched_version}"));
@@ -46,13 +47,13 @@ pub(crate) fn download_firefox(version: &str) -> Result<()> {
     Ok(())
 }
 
-fn download_firefox_zip(version: &str, arch: &str) -> Result<Bytes> {
+fn download_firefox_zip(version: &str, arch: &str, client: &Client) -> Result<Bytes> {
     let cur_dir = current_dir()?;
     let url = format!(
         "https://ftp.mozilla.org/pub/firefox/releases/{version}/{arch}/zh-CN/Firefox%20Setup%20{version}.exe"
     );
     println!("==> download firefox: {url}");
-    let response = reqwest::blocking::get(url)?;
+    let response = client.get(url).send()?;
     if !response.status().is_success() {
         return Err(anyhow!("Download firefox failed: {}", response.status()));
     }
@@ -75,7 +76,7 @@ fn download_firefox_zip(version: &str, arch: &str) -> Result<Bytes> {
 struct FirefoxVersionSpider(Vec<String>);
 
 impl FirefoxVersionSpider {
-    fn init() -> Result<Self> {
+    fn init(client: &Client) -> Result<Self> {
         let cached_releases_path = get_cached_file_path("firefox-releases.json")?;
         if cached_releases_path.exists() {
             println!("==> using cached firefox releases");
@@ -83,8 +84,10 @@ impl FirefoxVersionSpider {
             Ok(Self(releases))
         } else {
             println!("==> fetching firefox releases from ftp.mozilla.org ...");
-            let response =
-                reqwest::blocking::get("https://ftp.mozilla.org/pub/firefox/releases/")?.text()?;
+            let response = client
+                .get("https://ftp.mozilla.org/pub/firefox/releases/")
+                .send()?
+                .text()?;
             let doc = Document::from(response.as_str());
             let releases = doc
                 .find(

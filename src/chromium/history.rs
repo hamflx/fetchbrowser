@@ -1,6 +1,7 @@
 use std::{fs::File, io::BufReader};
 
 use anyhow::Result;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::{platform::Platform, utils::get_cached_file_path};
@@ -8,7 +9,7 @@ use crate::{platform::Platform, utils::get_cached_file_path};
 pub(crate) struct ChromiumHistory(Vec<ChromiumHistoryInfo>);
 
 impl ChromiumHistory {
-    pub(crate) fn init(platform: Platform) -> Result<Self> {
+    pub(crate) fn init(platform: Platform, client: Client) -> Result<Self> {
         let os_arg = platform.arg_name();
         let history_json_path = get_cached_file_path(&format!("history-{os_arg}.json"))?;
         let history_list = if std::fs::try_exists(&history_json_path).unwrap_or_default() {
@@ -18,7 +19,7 @@ impl ChromiumHistory {
             println!("==> retrieving history.json ...");
             let url =
                 format!("https://omahaproxy.appspot.com/history.json?os={os_arg}&channel=stable");
-            let response = reqwest::blocking::get(url)?;
+            let response = client.get(url).send()?;
             let history_list: Vec<ChromiumHistoryInfo> = serde_json::from_reader(response)?;
             std::fs::write(&history_json_path, serde_json::to_string(&history_list)?)?;
             history_list
@@ -48,13 +49,13 @@ pub(crate) struct ChromiumHistoryInfo {
 }
 
 impl ChromiumHistoryInfo {
-    pub(crate) fn deps(&self) -> Result<ChromiumDepsInfo> {
+    pub(crate) fn deps(&self, client: &Client) -> Result<ChromiumDepsInfo> {
         let url = format!(
             "https://omahaproxy.appspot.com/deps.json?version={}",
             self.version
         );
         println!("==> fetching deps {url} ...");
-        let response = reqwest::blocking::get(url)?;
+        let response = client.get(url).send()?;
         Ok(serde_json::from_reader(response)?)
     }
 }

@@ -36,6 +36,20 @@ Download `Firefox 98`:
 fb --firefox 98
 ```
 
+使用 socks5 代理：
+
+Using SOCKS5 proxy:
+
+```powershell
+# 使用 socks5h 以使 DNS 通过代理解析。
+# Use socks5h to resolve DNS through the proxy.
+fb --proxy socks5h://127.0.0.1:10801 98
+
+# 或仅使用 socks5 代理。
+# Or simply use socks5 proxy.
+fb --proxy socks5://127.0.0.1:10801 98
+```
+
 ## 许可（License）
 
 MIT @ 2023 hamflx
