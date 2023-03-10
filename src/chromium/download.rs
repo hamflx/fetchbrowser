@@ -25,6 +25,10 @@ pub(crate) fn download_chromium_zip_file(
         let zip_name = zip.name();
         println!("==> unzip: {zip_name}");
 
+        if zip_name.contains("interactive_ui_tests") {
+            continue;
+        }
+
         if zip_name.starts_with("chrome-win/")
             || zip_name.starts_with("chrome-win32/")
             || zip_name.starts_with("chrome-mac/")
