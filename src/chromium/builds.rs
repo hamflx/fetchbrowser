@@ -13,7 +13,7 @@ impl ChromiumBuilds {
         let prefix = platform.prefix();
         let builds_json_path = get_cached_file_path(&format!("builds-{prefix}.json"))?;
         let build_list = if std::fs::try_exists(&builds_json_path).unwrap_or_default() {
-            println!("==> using cached builds.");
+            println!("==> using cached builds: {}", builds_json_path.display());
             serde_json::from_reader(BufReader::new(File::open(&builds_json_path)?))?
         } else {
             println!("==> retrieving builds ...");

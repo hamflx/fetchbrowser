@@ -4,21 +4,27 @@ use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::{platform::Platform, utils::get_cached_file_path};
+use crate::{common::ReleaseChannel, platform::Platform, utils::get_cached_file_path};
 
 pub(crate) struct ChromiumHistory(Vec<ChromiumHistoryInfo>);
 
 impl ChromiumHistory {
-    pub(crate) fn init(platform: Platform, client: Client) -> Result<Self> {
+    pub(crate) fn init(
+        platform: Platform,
+        channel: ReleaseChannel,
+        client: Client,
+    ) -> Result<Self> {
         let os_arg = platform.arg_name();
-        let history_json_path = get_cached_file_path(&format!("history-{os_arg}.json"))?;
+        let channel = channel.as_constant();
+        let history_json_path = get_cached_file_path(&format!("history-{os_arg}-{channel}.json"))?;
         let history_list = if std::fs::try_exists(&history_json_path).unwrap_or_default() {
-            println!("==> using cached history.");
+            println!("==> using cached history: {}", history_json_path.display());
             serde_json::from_reader(BufReader::new(File::open(&history_json_path)?))?
         } else {
             println!("==> retrieving history.json ...");
-            let url =
-                format!("https://omahaproxy.appspot.com/history.json?os={os_arg}&channel=stable");
+            let url = format!(
+                "https://omahaproxy.appspot.com/history.json?os={os_arg}&channel={channel}"
+            );
             let response = client.get(url).send()?;
             let history_list: Vec<ChromiumHistoryInfo> = serde_json::from_reader(response)?;
             std::fs::write(&history_json_path, serde_json::to_string(&history_list)?)?;

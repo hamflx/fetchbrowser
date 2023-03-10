@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use reqwest::blocking::Client;
 
 use crate::{
-    common::{BrowserReleaseItem, BrowserReleases},
+    common::{BrowserReleaseItem, BrowserReleases, ReleaseChannel},
     platform::Platform,
 };
 
@@ -30,12 +30,12 @@ impl BrowserReleases for ChromiumReleases {
     type ReleaseItem = ChromiumReleaseItem;
     type Matches<'r> = ChromiumReleaseMatches<'r>;
 
-    fn init(platform: Platform, client: Client) -> anyhow::Result<Self>
+    fn init(platform: Platform, channel: ReleaseChannel, client: Client) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
         // history.json 包含了 base_position 和版本号。
-        let history = ChromiumHistory::init(platform, client.clone())?;
+        let history = ChromiumHistory::init(platform, channel, client.clone())?;
         // builds 包含了所有可下载的 position 信息。
         let builds = ChromiumBuilds::init(platform, client.clone())?;
         Ok(Self {

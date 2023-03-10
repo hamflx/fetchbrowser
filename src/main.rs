@@ -11,7 +11,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use chromium::ChromiumReleases;
 use clap::Parser;
-use common::{BrowserReleaseItem, BrowserReleases};
+use common::{BrowserReleaseItem, BrowserReleases, ReleaseChannel};
 use firefox::download_firefox;
 use platform::{Arch, Os, Platform};
 use reqwest::blocking::{Client, ClientBuilder};
@@ -22,7 +22,6 @@ struct Args {
     #[arg(short, long)]
     os: Option<String>,
 
-    #[arg()]
     browser_version: String,
 
     #[arg(long)]
@@ -33,6 +32,9 @@ struct Args {
 
     #[arg(short, long)]
     proxy: Option<String>,
+
+    #[arg(long, value_enum, default_value_t = ReleaseChannel::Stable)]
+    channel: ReleaseChannel,
 }
 
 fn main() {
@@ -48,15 +50,19 @@ fn run() -> Result<()> {
     if args.chrome || no_browser_specified {
         let os = Os::from_str(args.os.as_deref().unwrap_or(std::env::consts::OS))?;
         let x64platform = Platform::new(os, Arch::X86_64);
-        if let Err(err) =
-            download_browser::<ChromiumReleases>(x64platform, proxy.clone(), &args.browser_version)
-        {
+        if let Err(err) = download_browser::<ChromiumReleases>(
+            x64platform,
+            args.channel,
+            proxy.clone(),
+            &args.browser_version,
+        ) {
             // todo 这里不要无脑回退下载 x86，应该在版本找不到的时候才下载 x86 版本的。
             let x86platform = Platform::new(os, Arch::X86);
             if !x64platform.eq_impl(&x86platform) {
                 println!("==> 下载 x64 版本出错，尝试 x86: {err}");
                 download_browser::<ChromiumReleases>(
                     x86platform,
+                    args.channel,
                     proxy.clone(),
                     &args.browser_version,
                 )?;
@@ -82,10 +88,11 @@ fn build_proxy_client(proxy: Option<&str>) -> Result<Client> {
 
 fn download_browser<B: BrowserReleases>(
     platform: Platform,
+    channel: ReleaseChannel,
     client: Client,
     version: &str,
 ) -> Result<()> {
-    let fetcher = B::init(platform, client)?;
+    let fetcher = B::init(platform, channel, client)?;
     let matched_version_list = fetcher.match_version(version);
     if let Some(release) = matched_version_list.into_iter().next() {
         release?.download()?;

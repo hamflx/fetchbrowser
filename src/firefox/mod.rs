@@ -79,7 +79,10 @@ impl FirefoxVersionSpider {
     fn init(client: &Client) -> Result<Self> {
         let cached_releases_path = get_cached_file_path("firefox-releases.json")?;
         if cached_releases_path.exists() {
-            println!("==> using cached firefox releases");
+            println!(
+                "==> using cached firefox releases: {}",
+                cached_releases_path.display()
+            );
             let releases = serde_json::from_reader(std::fs::File::open(cached_releases_path)?)?;
             Ok(Self(releases))
         } else {

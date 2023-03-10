@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::ValueEnum;
 use reqwest::blocking::Client;
 
 use crate::platform::Platform;
@@ -9,7 +10,7 @@ pub(crate) trait BrowserReleases {
     where
         Self: 'r;
 
-    fn init(platform: Platform, client: Client) -> Result<Self>
+    fn init(platform: Platform, channel: ReleaseChannel, client: Client) -> Result<Self>
     where
         Self: Sized;
 
@@ -18,4 +19,23 @@ pub(crate) trait BrowserReleases {
 
 pub(crate) trait BrowserReleaseItem {
     fn download(&self) -> Result<()>;
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+pub(crate) enum ReleaseChannel {
+    Stable,
+    Beta,
+    Dev,
+    Canary,
+}
+
+impl ReleaseChannel {
+    pub(crate) fn as_constant(&self) -> &'static str {
+        match self {
+            ReleaseChannel::Stable => "stable",
+            ReleaseChannel::Beta => "beta",
+            ReleaseChannel::Dev => "dev",
+            ReleaseChannel::Canary => "canary",
+        }
+    }
 }
