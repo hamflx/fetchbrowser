@@ -16,14 +16,14 @@ impl ChromiumHistory {
     ) -> Result<Self> {
         let os_arg = platform.arg_name();
         let channel = channel.as_constant();
-        let history_json_path = get_cached_file_path(&format!("history-{os_arg}-{channel}.json"))?;
+        let history_json_path = get_cached_file_path(&format!("releases-{os_arg}-{channel}.json"))?;
         let history_list = if std::fs::try_exists(&history_json_path).unwrap_or_default() {
             println!("==> using cached history: {}", history_json_path.display());
             serde_json::from_reader(BufReader::new(File::open(&history_json_path)?))?
         } else {
-            println!("==> retrieving history.json ...");
+            println!("==> retrieving releases.json ...");
             let url = format!(
-                "https://omahaproxy.appspot.com/history.json?os={os_arg}&channel={channel}"
+                "https://chromiumdash.appspot.com/fetch_releases?platform={os_arg}&channel={channel}&num=600&offset=0"
             );
             let response = client.get(url).send()?;
             let history_list: Vec<ChromiumHistoryInfo> = serde_json::from_reader(response)?;
@@ -49,9 +49,9 @@ impl ChromiumHistory {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ChromiumHistoryInfo {
     pub(crate) channel: String,
-    pub(crate) os: String,
-    pub(crate) timestamp: String,
+    pub(crate) platform: String,
     pub(crate) version: String,
+    pub(crate) chromium_main_branch_position: Option<usize>,
 }
 
 impl ChromiumHistoryInfo {

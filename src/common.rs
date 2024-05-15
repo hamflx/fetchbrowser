@@ -32,10 +32,10 @@ pub(crate) enum ReleaseChannel {
 impl ReleaseChannel {
     pub(crate) fn as_constant(&self) -> &'static str {
         match self {
-            ReleaseChannel::Stable => "stable",
-            ReleaseChannel::Beta => "beta",
-            ReleaseChannel::Dev => "dev",
-            ReleaseChannel::Canary => "canary",
+            ReleaseChannel::Stable => "Stable",
+            ReleaseChannel::Beta => "Beta",
+            ReleaseChannel::Dev => "Dev",
+            ReleaseChannel::Canary => "Canary",
         }
     }
 }

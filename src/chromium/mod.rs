@@ -73,30 +73,20 @@ impl<'r> Iterator for ChromiumReleaseMatches<'r> {
 
     fn next(&mut self) -> Option<Self::Item> {
         for history in self.iter.by_ref() {
-            let deps = match history.deps(&self.releases.client) {
-                Ok(deps) => deps,
-                Err(err) => return Some(Err(err)),
-            };
-            match deps.chromium_base_position {
-                Some(pos) => match pos.parse::<usize>() {
-                    Ok(pos) => match self.releases.builds.find(pos, self.prefix) {
-                        Some(rev_prefix) => {
-                            return Some(Ok(ChromiumReleaseItem {
-                                rev_prefix: rev_prefix.clone(),
-                                version: deps.chromium_version,
-                                client: self.releases.client.clone(),
-                            }))
-                        }
-                        None => println!("==> no build found for rev: {pos}"),
-                    },
-                    Err(err) => println!(
-                        "==> chromium {}: parse base_position error: {:?}",
-                        deps.chromium_version, err
-                    ),
+            match history.chromium_main_branch_position {
+                Some(pos) => match self.releases.builds.find(pos, self.prefix) {
+                    Some(rev_prefix) => {
+                        return Some(Ok(ChromiumReleaseItem {
+                            rev_prefix: rev_prefix.clone(),
+                            version: history.version.clone(),
+                            client: self.releases.client.clone(),
+                        }))
+                    }
+                    None => println!("==> no build found for rev: {pos}"),
                 },
                 None => println!(
                     "==> chromium {}: no chromium_base_position.",
-                    deps.chromium_version
+                    history.version
                 ),
             }
         }
